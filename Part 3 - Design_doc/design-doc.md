@@ -56,13 +56,13 @@ Cron:
 ### 3.2.1 Targets to commit
 For LMS production:
 
-- **RTO**: 60 minutes for regional service restoration
-- **RPO**: 15 minutes for relational data, near-zero for uploads with versioning and replication
+- **RTO**: 15 minutes for regional service restoration
+- **RPO**: 5 minutes for relational data, near-zero for uploads with versioning and replication
 
 For WordPress/WooCommerce:
 
-- **RTO**: 60 minutes
-- **RPO**: 15–30 minutes depending on replication mode
+- **RTO**: 15 minutes
+- **RPO**: 5-10 minutes depending on replication mode
 
 ### 3.2.2 Backup design
 #### Database
