@@ -1,0 +1,143 @@
+name: LMS application deployment
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      target_env:
+        description: Environment to deploy
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+        default: dev
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: ca-central-1
+  PHP_VERSION: '8.2'
+
+jobs:
+  test:
+    name: Run app tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          tools: composer
+
+      - name: Install PHP dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress --no-scripts
+
+      - name: Run PHPUnit
+        run: ./vendor/bin/phpunit --configuration phpunit.xml --colors=never --testdox
+
+  build:
+    name: Build release artifact
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ env.PHP_VERSION }}
+          tools: composer
+
+      - name: Install production dependencies
+        run: composer install --no-dev --no-interaction --prefer-dist --no-progress --no-scripts
+
+      - name: Create release archive
+        run: tar -czf app-release.tar.gz -C . --exclude=.git --exclude=.github .
+
+      - name: Upload release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release
+          path: app-release.tar.gz
+
+  deploy-dev:
+    name: Deploy to dev
+    needs: build
+    if: github.event_name == 'push' || github.event.inputs.target_env == 'dev'
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-release
+          path: release
+
+      - name: Configure AWS credentials for dev account
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::111111111111:role/github-actions-lms-dev
+          role-session-name: github-actions-dev-${{ github.run_id }}
+
+      - name: Publish artifact to dev release bucket
+        run: |
+          mkdir -p ./release
+          aws s3 cp ./release/app-release.tar.gz s3://maple-academy-dev-artifacts/releases/${{ github.sha }}.tar.gz
+
+      - name: Deploy to dev app nodes
+        run: |
+          aws ssm send-command \
+            --document-name AWS-RunShellScript \
+            --targets "Key=tag:Environment,Values=dev" \
+            --parameters '{"commands":["set -e","aws s3 cp s3://maple-academy-dev-artifacts/releases/${GITHUB_SHA}.tar.gz /tmp/app-release.tar.gz","mkdir -p /var/www/maple","tar -xzf /tmp/app-release.tar.gz -C /var/www/maple","ln -sfn /var/www/maple /var/www/html"]}' \
+            --comment "Deploy LMS PHP app to the dev environment"
+
+      - name: Smoke test dev deployment
+        run: |
+          curl -fsS https://dev-maple-alb.example.com/health || curl -fsS https://dev-maple-alb.example.com/
+
+  deploy-prod:
+    name: Deploy to prod
+    needs: deploy-dev
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.target_env == 'prod'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Download release artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: app-release
+          path: release
+
+      - name: Configure AWS credentials for prod account
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: arn:aws:iam::222222222222:role/github-actions-lms-prod
+          role-session-name: github-actions-prod-${{ github.run_id }}
+
+      - name: Promote approved artifact to prod bucket
+        run: |
+          aws s3 cp ./release/app-release.tar.gz s3://maple-academy-prod-artifacts/releases/${{ github.sha }}.tar.gz
+
+      - name: Deploy to prod app nodes
+        run: |
+          aws ssm send-command \
+            --document-name AWS-RunShellScript \
+            --targets "Key=tag:Environment,Values=prod" \
+            --parameters '{"commands":["set -e","aws s3 cp s3://maple-academy-prod-artifacts/releases/${GITHUB_SHA}.tar.gz /tmp/app-release.tar.gz","mkdir -p /var/www/maple","tar -xzf /tmp/app-release.tar.gz -C /var/www/maple","ln -sfn /var/www/maple /var/www/html"]}' \
+            --comment "Deploy LMS PHP app to the production environment"
+
+      - name: Smoke test prod deployment
+        run: |
+          curl -fsS https://prod-maple-alb.example.com/health || curl -fsS https://prod-maple-alb.example.com/
