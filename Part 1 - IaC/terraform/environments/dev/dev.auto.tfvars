@@ -1,0 +1,16 @@
+project_name         = "maple-ova"
+environment          = "dev"
+aws_account_id       = "111111111111"
+aws_region           = "ca-central-1"
+vpc_cidr             = "10.41.0.0/16"
+public_subnet_cidrs  = ["10.41.0.0/24", "10.41.2.0/24", "10.41.4.0/24"]
+private_subnet_cidrs = ["10.41.10.0/24", "10.41.12.0/24", "10.41.14.0/24"]
+availability_zones   = ["ca-central-1a", "ca-central-1b", "ca-central-1d"]
+db_instance_class    = "db.t4g.micro"
+db_allocated_storage = 20
+db_password          = "ChangeMeToARealPassword123!"
+app_ami_id           = "ami-0123456789abcdef0"
+app_instance_type    = "t3.micro"
+app_min_size         = 1
+app_desired_capacity = 1
+app_max_size         = 2
